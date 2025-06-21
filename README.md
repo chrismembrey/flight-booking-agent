@@ -10,7 +10,7 @@ This project is an intelligent flight booking assistant that integrates natural 
 - **Modular architecture** for easy extension and eventual integration with FastAPI
 
 ## Project Structure
-
+```text
 project/
 │
 ├── utils/
@@ -22,7 +22,7 @@ project/
 ├── .env # Stores API keys and environment variables
 ├── config.ini # Configuration for API models and settings
 └── README.md # Project overview and documentation
-
+```
 
 ## Setup Instructions
 
