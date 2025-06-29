@@ -3,23 +3,23 @@ from utils.openai_flight_query import get_flight_query
 
 #---
 
-import requests
-import os
-import requests
-import pandas as pd
-import configparser
-from dotenv import load_dotenv, find_dotenv
+# import requests
+# import os
+# import requests
+# import pandas as pd
+# import configparser
+# from dotenv import load_dotenv, find_dotenv
 
-# Load .env and config
-load_dotenv(find_dotenv())
-config = configparser.ConfigParser()
-config.read('config.ini')
-URL = config['api']['RAPID_API_BOOKING_PATH']
+# # Load .env and config
+# load_dotenv(find_dotenv())
+# config = configparser.ConfigParser()
+# config.read('config.ini')
+# URL = config['api']['RAPID_API_BOOKING_PATH']
 
-HEADERS = {
-    "x-rapidapi-key": os.getenv("RAPIDAPI_KEY"),
-    "x-rapidapi-host": "booking-com15.p.rapidapi.com"
-}
+# HEADERS = {
+#     "x-rapidapi-key": os.getenv("RAPIDAPI_KEY"),
+#     "x-rapidapi-host": "booking-com15.p.rapidapi.com"
+# }
 
 #--- 
 
