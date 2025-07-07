@@ -1,29 +1,11 @@
 from utils.extract_flights import fetch_and_extract
 from utils.openai_flight_query import get_flight_query
+from utils.chat_session import ChatSession
 
-#---
+# Start conversation session
+chat = ChatSession()
 
-# import requests
-# import os
-# import requests
-# import pandas as pd
-# import configparser
-# from dotenv import load_dotenv, find_dotenv
-
-# # Load .env and config
-# load_dotenv(find_dotenv())
-# config = configparser.ConfigParser()
-# config.read('config.ini')
-# URL = config['api']['RAPID_API_BOOKING_PATH']
-
-# HEADERS = {
-#     "x-rapidapi-key": os.getenv("RAPIDAPI_KEY"),
-#     "x-rapidapi-host": "booking-com15.p.rapidapi.com"
-# }
-
-#--- 
-
-
+# Get user input and send to OpenAI to generate query
 user_input = input(
     "Enter your flight search including:\n"
     "- Departure city or airport\n"
@@ -40,5 +22,18 @@ user_input = input(
 
 query = get_flight_query(user_input)
 df = fetch_and_extract(query)
-print('DataFrame:')
-print(df.head())
+
+# Add initial context to chat session
+chat.add_user_message(user_input)
+chat.add_user_message("Here are the flight results:")
+chat.add_user_message(df.to_string(index=False))
+
+# Enter into continuous dialogue
+while True:
+    follow_up = input("\nAsk a follow-up or type 'exit' to quit:\n> ")
+    if follow_up.lower() == 'exit':
+        break
+
+    chat.add_user_message(follow_up)
+    reply = chat.get_response()
+    print(f"\nAssistant: {reply}")
