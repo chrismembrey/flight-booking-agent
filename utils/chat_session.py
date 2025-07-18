@@ -1,5 +1,5 @@
 # utils/chat_session.py
-from typing import List, Dict
+from typing import List, Dict, Any
 from openai import OpenAI
 import configparser
 import os
