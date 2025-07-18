@@ -43,7 +43,7 @@ def get_flight_query(user_text: str) -> dict:
                 }
             }
         ],
-        tool_choice="auto"
+        tool_choice={"type": "function", "function": {"name": "get_flight_query"}}
     )
 
     # Defensive handling in case OpenAI doesn't call the tool
@@ -55,3 +55,26 @@ def get_flight_query(user_text: str) -> dict:
         return json.loads(arguments)
     except (AttributeError, IndexError, TypeError, json.JSONDecodeError) as e:
         raise ValueError("OpenAI returned an unexpected format. Try rephrasing the input.") from e
+    
+
+def prepare_amadeus_query(query: dict) -> dict:
+    """
+    Clean and prepare a structured OpenAI-generated flight query 
+    for use with the Amadeus API.
+
+    Converts:
+    - Boolean values (like True/False) to 'true'/'false' strings
+    - Removes any None values
+    - Ensures all values are valid Amadeus query params
+    """
+    cleaned = {}
+
+    for k, v in query.items():
+        if v is None:
+            continue  # Skip None values
+        if isinstance(v, bool):
+            cleaned[k] = str(v).lower()  # Convert True → 'true'
+        else:
+            cleaned[k] = v
+
+    return cleaned

@@ -1,114 +1,128 @@
 import os
 import requests
 import pandas as pd
-import configparser
+from utils.amadeus_auth import get_amadeus_access_token
 from dotenv import load_dotenv, find_dotenv
 
-# Load .env and config
+# Load environment variables from .env file
 load_dotenv(find_dotenv())
-config = configparser.ConfigParser()
-config.read('config.ini')
-URL = config['api']['RAPID_API_BOOKING_PATH']
 
-HEADERS = {
-    "x-rapidapi-key": os.getenv("RAPIDAPI_KEY"),
-    "x-rapidapi-host": "booking-com15.p.rapidapi.com"
-}
 
-def extract_flights_from_response(raw_json: dict) -> pd.DataFrame:
-    """Parse raw API response JSON into a structured Pandas DataFrame."""
-    flights = raw_json.get('data', {})
-    offers = flights.get('flightOffers', [])
+def query_amadeus_flight_offers(query: dict) -> list:
+    """
+    Send a GET request to the Amadeus Flight Offers Search API using the given query parameters.
 
-    flight_rows = []
-    for offer in offers:
-        token = offer.get('token', '')
-        price = offer.get('priceBreakdown', {}).get('total', {})
-        total_price = price.get('units', 0) + price.get('nanos', 0) / 1e9
+    Args:
+        query (dict): Dictionary of query parameters, including IATA codes, dates, etc.
 
-        for segment in offer.get('segments', []):
-            for leg in segment.get('legs', []):
-                flight_rows.append({
-                    'token': token,
-                    'departure_airport': leg.get('departureAirport', {}).get('code', ''),
-                    'arrival_airport': leg.get('arrivalAirport', {}).get('code', ''),
-                    'departure_time': leg.get('departureTime', ''),
-                    'arrival_time': leg.get('arrivalTime', ''),
-                    'carrier': ', '.join(c.get('name', '') for c in leg.get('carriersData', [])),
-                    'flight_number': leg.get('flightInfo', {}).get('flightNumber', ''),
-                    'cabin_class': leg.get('cabinClass', 'ECONOMY'),
-                    'total_price': total_price
-                })
+    Returns:
+        list: A list of raw flight offer objects returned by the Amadeus API.
+    """
+    url = f"{os.getenv('AMADEUS_BASE_URL')}/v2/shopping/flight-offers"
+    token = get_amadeus_access_token()
+    headers = {
+        "Authorization": f"Bearer {token}"
+    }
 
-    df = pd.DataFrame(flight_rows)
-    if df.empty:
-        return df
+    # Send the request to Amadeus API
+    response = requests.get(url, headers=headers, params=query)
+    response.raise_for_status()  # Raise error if request fails
+    return response.json().get("data", [])  # Return list of flight offers
 
-    df['departure_time'] = pd.to_datetime(df['departure_time'])
-    df['arrival_time'] = pd.to_datetime(df['arrival_time'])
 
-    # Sort legs by departure time within each token
-    df = df.sort_values(['token', 'departure_time'])
+def extract_flight_offer_summary(offer: dict) -> dict:
+    """
+    Flatten a single flight offer into a summary dictionary with human-readable fields.
 
-    # Classify direction: first leg = outbound, rest = inbound (simplified fallback)
-    df['direction'] = df.groupby('token')['departure_time'] \
-                        .rank(method='first', ascending=True) \
-                        .apply(lambda x: 'outbound' if x == 1 else 'inbound')
+    Args:
+        offer (dict): One raw flight offer object from Amadeus.
 
-    # Build route strings per token+direction
-    df['leg_route'] = df['departure_airport'] + ' > ' + df['arrival_airport']
-    routes = df.groupby(['token', 'direction'])['leg_route'].apply(lambda x: ' > '.join(x)).reset_index(name='route')
+    Returns:
+        dict: A flattened summary of the flight offer including route, price, and carriers.
+    """
+    itineraries = offer.get("itineraries", [])
+    total_price = offer.get("price", {}).get("total", "N/A")
+    currency = offer.get("price", {}).get("currency", "EUR")
 
-    # Collapse relevant fields per token+direction
-    summary = df.groupby(['token', 'direction']).agg({
-        'departure_time': 'first',
-        'arrival_time': 'last',
-        'carrier': lambda x: ', '.join(set(x.dropna())),
-        'flight_number': 'first',
-        'cabin_class': 'first',
-        'total_price': 'first'
-    }).reset_index()
+    # Extract outbound and inbound segment groups
+    outbound = itineraries[0]["segments"]
+    inbound = itineraries[1]["segments"] if len(itineraries) > 1 else []
 
-    # Merge in route strings
-    summary = summary.merge(routes, on=['token', 'direction'], how='left')
+    def segment_summary(segments):
+        """
+        Summarises a list of segments into route, departure/arrival times, and carrier info.
+        """
+        if not segments:
+            return "", "", "", ""
 
-    # Pivot to wide format (one row per token)
-    df = summary.pivot_table(index='token', columns='direction', aggfunc='first')
-    df.columns = ['_'.join(col) for col in df.columns]
-    df.reset_index(inplace=True)
+        dep = segments[0]["departure"]
+        arr = segments[-1]["arrival"]
 
-    # Ensure columns exist
-    outbound = [
-        'route_outbound', 'departure_time_outbound', 'arrival_time_outbound',
-        'carrier_outbound', 'flight_number_outbound', 'cabin_class_outbound',
-        'total_price_outbound'
-    ]
-    inbound = [
-        'route_inbound', 'departure_time_inbound', 'arrival_time_inbound',
-        'carrier_inbound', 'flight_number_inbound', 'cabin_class_inbound',
-        'total_price_inbound'
-    ]
-    for col in outbound + inbound:
-        df[col] = df.get(col)
+        # Format: A > B > C
+        route = " > ".join([seg["departure"]["iataCode"] for seg in segments] + [arr["iataCode"]])
 
-    # Rearrange and clean columns
-    df = df[['token'] + outbound + inbound]
-    df.rename(columns={'total_price_outbound': 'total_price'}, inplace=True)
-    df.drop(columns=['total_price_inbound'], inplace=True, errors='ignore')
+        # Carriers involved
+        carrier = ", ".join(set(seg["carrierCode"] for seg in segments))
 
-    df['trip_type'] = df['route_inbound'].apply(
-        lambda x: 'one-way' if pd.isna(x) else 'return'
-    )
+        # Full flight numbers
+        flight_nums = ", ".join([f'{seg["carrierCode"]}{seg["number"]}' for seg in segments])
 
-    cols = [c for c in df.columns if c != 'total_price'] + ['total_price']
-    return df[cols]
+        return route, dep["at"], arr["at"], f"{carrier} ({flight_nums})"
+
+    # Extract summaries
+    outbound_route, dep_out, arr_out, carrier_out = segment_summary(outbound)
+    inbound_route, dep_in, arr_in, carrier_in = segment_summary(inbound)
+
+    return {
+        "id": offer.get("id"),
+        "price": float(total_price),
+        "currency": currency,
+        "outbound_route": outbound_route,
+        "outbound_departure": dep_out,
+        "outbound_arrival": arr_out,
+        "outbound_carrier": carrier_out,
+        "inbound_route": inbound_route,
+        "inbound_departure": dep_in,
+        "inbound_arrival": arr_in,
+        "inbound_carrier": carrier_in,
+        "trip_type": "return" if inbound_route else "one-way",
+        "raw_offer": offer  # Full offer object for pricing and booking later
+    }
+
+
+def extract_flights_from_response(offers: list) -> pd.DataFrame:
+    """
+    Convert a list of Amadeus flight offers into a pandas DataFrame of flattened rows.
+
+    Args:
+        offers (list): A list of raw offer objects from Amadeus.
+
+    Returns:
+        pd.DataFrame: DataFrame containing clean, structured flight info + raw offer.
+    """
+    rows = [extract_flight_offer_summary(offer) for offer in offers]
+    return pd.DataFrame(rows)
 
 
 def fetch_and_extract(query: dict) -> pd.DataFrame:
     """
-    Combine API call and extraction.
-    `query` should be the JSON from OpenAI containing flight search parameters.
+    Full wrapper: fetch flight offers from Amadeus and convert them into a summary DataFrame.
+
+    Args:
+        query (dict): Dictionary of search parameters formatted for Amadeus API.
+
+    Returns:
+        pd.DataFrame: Structured DataFrame of available flight offers.
     """
-    response = requests.get(URL, headers=HEADERS, params=query)
-    data = response.json()
-    return extract_flights_from_response(data)
+    offers = query_amadeus_flight_offers(query)
+    
+    # If no offers were found, return an empty DataFrame with the correct columns
+    if not offers:
+        return pd.DataFrame(columns=[
+            "id", "price", "currency", 
+            "outbound_route", "outbound_departure", "outbound_arrival", "outbound_carrier", 
+            "inbound_route", "inbound_departure", "inbound_arrival", "inbound_carrier", 
+            "trip_type", "raw_offer"
+        ])
+    
+    return extract_flights_from_response(offers)
