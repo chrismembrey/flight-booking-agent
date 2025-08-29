@@ -5,9 +5,6 @@ import configparser
 import os
 from dotenv import load_dotenv, find_dotenv
 from config.prompts import BOOOKING_INTENT_PROMPT, FLIGHT_INDEX_PROMPT
-import json
-
-json()
 
 # Load environment variables and config
 load_dotenv(find_dotenv())
