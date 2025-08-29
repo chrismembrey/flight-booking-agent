@@ -84,3 +84,29 @@ FLIGHT_JSON_SCHEMA = {
   },
   "required": ["originLocationCode", "destinationLocationCode", "departureDate", "adults", "max"]
 }
+
+BOOOKING_INTENT_PROMPT = """
+                You are a strict classifier.
+
+                Your job is to decide if the user is **explicitly** attempting to book a flight — not just browsing, asking about options, or showing mild interest.
+
+                The user just said:
+                \"\"\"{user_message}\"\"\"
+
+                Respond with ONLY `true` or `false` — all lowercase, no punctuation, and no other explanation.
+
+                Examples of `true`:
+                - "I want to book this flight"
+                - "Let's go ahead with option 3"
+                - "I'm ready to confirm the booking"
+
+                Examples of `false`:
+                - "Which flight is fastest?"
+                - "I'd like the cheapest flights that both leave before 10 in the morning"
+                - "Can I leave in the afternoon instead?"
+
+                Is the user ready to book?
+                """
+
+FLIGHT_INDEX_PROMPT = """Based on our earlier conversation and the table of flight options I gave you, which numbered option is the user referring to for booking?
+Please just return the number only (starting from 1)."""
