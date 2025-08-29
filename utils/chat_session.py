@@ -46,3 +46,84 @@ class ChatSession:
 
     def get_display_messages(self) -> List[Dict[str, str]]:
         return [m for m in self.messages if m.get("display", True)]
+
+    def detect_booking_intent(self, user_message: str) -> bool:
+        """
+        Return True only if the user is explicitly ready to book a flight.
+        Examples that should return True:
+        - "I want to book now"
+        - "Can we go ahead with this one?"
+        - "I'm ready to confirm"
+
+        Examples that should return False:
+        - "Can you tell me more about this flight?"
+        - "Is baggage included?"
+        - "I might book soon"
+
+        Returns:
+            bool: whether the user shows booking intent
+        """
+        prompt = f"""
+                You are a strict classifier.
+
+                Your job is to decide if the user is **explicitly** attempting to book a flight — not just browsing, asking about options, or showing mild interest.
+
+                The user just said:
+                \"\"\"{user_message}\"\"\"
+
+                Respond with ONLY `true` or `false` — all lowercase, no punctuation, and no other explanation.
+
+                Examples of `true`:
+                - "I want to book this flight"
+                - "Let's go ahead with option 3"
+                - "I'm ready to confirm the booking"
+
+                Examples of `false`:
+                - "Which flight is fastest?"
+                - "What does option 4 include?"
+                - "Can I leave in the afternoon instead?"
+
+                Is the user ready to book?
+                """
+
+        try:
+            response = client.chat.completions.create(
+                model=openai_model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0
+            )
+            content = response.choices[0].message.content.strip().lower()
+            return content == "true"
+        except Exception as e:
+            raise RuntimeError(f"Failed to detect booking intent: {e}")
+        
+    def identify_flight_index(self) -> int | None:
+        """
+        Ask the LLM to infer which flight option (index) the user is referring to based on prior chat history.
+        Returns an integer index if one is found, else None.
+        """
+        cleaned_messages = [
+            {k: v for k, v in m.items() if k in {"role", "content"}}
+            for m in self.messages
+        ]
+        cleaned_messages.append({
+            "role": "user",
+            "content": (
+                "Based on our earlier conversation and the table of flight options I gave you, "
+                "which numbered option is the user referring to for booking? "
+                "Please just return the number only (starting from 1)."
+            )
+        })
+
+        try:
+            completion = client.chat.completions.create(
+                model=openai_model,
+                messages=cleaned_messages,
+                store=False
+            )
+            response_text = completion.choices[0].message.content.strip()
+            if response_text.isdigit():
+                return int(response_text) - 1  # to match DataFrame indexing
+            return None
+        except Exception as e:
+            raise RuntimeError(f"Failed to identify flight index: {e}")

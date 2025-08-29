@@ -2,6 +2,7 @@ import streamlit as st
 from utils.openai_flight_query import get_flight_query
 from utils.query_helpers import prepare_amadeus_query
 from utils.extract_flights import fetch_and_extract
+from utils.amadeus_pricing_confirmation import confirm_flight_price
 from utils.chat_session import ChatSession
 
 st.set_page_config(page_title="AI Flight Booking Assistant", layout="centered")
@@ -33,7 +34,7 @@ if submitted and user_input:
                 st.session_state.df = None  # clear old results
                 st.warning("Sorry, we couldn't find any flights matching your search. Try different dates or airports.")
             else:
-                st.session_state.df = df.drop(columns=["raw_offer"])
+                st.session_state.df = df
 
             # Add context to chat
             st.session_state.chat.add_user_message(user_input)
@@ -52,12 +53,12 @@ with st.sidebar:
         st.session_state.df = None
         st.session_state.chat = ChatSession()
         st.session_state.chat_round = 0
-        st.experimental_rerun()
+        st.rerun()
 
 # --- Results section ---
 if st.session_state.df is not None:
     st.subheader("Available Flights")
-    st.dataframe(st.session_state.df)
+    st.dataframe(st.session_state.df.drop(columns=["raw_offer"]))
 
     st.subheader("💬 Chat with your Assistant")
 
@@ -77,9 +78,63 @@ if st.session_state.df is not None:
     if st.button("Send"):
         if follow_up.strip():
             st.session_state.chat.add_user_message(follow_up)
-            with st.spinner("Thinking..."):
-                reply = st.session_state.chat.get_response()
-            st.session_state.chat_round += 1
-            st.rerun()
+
+            # 🔍 Detect booking intent
+            intent = st.session_state.chat.detect_booking_intent(follow_up)
+
+            if intent:
+                st.session_state.intent_detected = True
+                try:
+                    selected_option = st.session_state.chat.identify_flight_index()
+                    if selected_option is None:
+                        st.session_state.chat.add_assistant_message(
+                            "❌ I detected you want to book a flight, but I couldn’t tell which one. Could you clarify the option (e.g. 'Option 2')?"
+                        )
+                    else:
+                        raw_offer = st.session_state.df.iloc[selected_option]["raw_offer"]
+
+                        with st.spinner("🔍 Confirming latest price..."):
+                            confirmed = confirm_flight_price(raw_offer)
+
+                        price = confirmed["data"]["flightOffers"][0]["price"]["grandTotal"]
+                        st.session_state.chat.add_assistant_message(
+                            f"✅ Booking intent detected. The latest confirmed price for your chosen option is £{price}. Would you like to proceed with booking?"
+                        )
+                except Exception as e:
+                    st.session_state.chat.add_assistant_message(
+                        f"❌ Sorry, something went wrong while confirming the price. Please try again. {e}"
+                    )
+
+                st.session_state.chat_round += 1
+                st.rerun()
+
+            elif st.session_state.get("intent_detected"):
+                try:
+                    selected_option = st.session_state.chat.identify_flight_index()
+                    if selected_option is None:
+                        st.session_state.chat.add_assistant_message(
+                            "❌ Still couldn’t identify which flight you mean. Please refer to the list using 'Option X'."
+                        )
+                    else:
+                        raw_offer = st.session_state.raw_df.iloc[selected_option]["raw_offer"]
+                        with st.spinner("🔍 Confirming latest price..."):
+                            confirmed = confirm_flight_price(raw_offer)
+                        price = confirmed["data"]["flightOffers"][0]["price"]["grandTotal"]
+                        st.session_state.chat.add_assistant_message(
+                            f"✅ The latest confirmed price for your selected option is £{price}. Would you like to proceed with booking?"
+                        )
+                        st.session_state.intent_detected = False  # Reset after success
+                except Exception as e:
+                    st.session_state.chat.add_assistant_message(
+                        "❌ Sorry, something went wrong while confirming the price. Please try again."
+                    )
+                st.session_state.chat_round += 1
+                st.rerun()
+
+            else:
+                with st.spinner("Thinking..."):
+                    reply = st.session_state.chat.get_response()
+                st.session_state.chat_round += 1
+                st.rerun()
         else:
             st.warning("Please enter a message.")
