@@ -4,6 +4,10 @@ from openai import OpenAI
 import configparser
 import os
 from dotenv import load_dotenv, find_dotenv
+from config.prompts import BOOOKING_INTENT_PROMPT, FLIGHT_INDEX_PROMPT
+import json
+
+json()
 
 # Load environment variables and config
 load_dotenv(find_dotenv())
@@ -63,28 +67,7 @@ class ChatSession:
         Returns:
             bool: whether the user shows booking intent
         """
-        prompt = f"""
-                You are a strict classifier.
-
-                Your job is to decide if the user is **explicitly** attempting to book a flight — not just browsing, asking about options, or showing mild interest.
-
-                The user just said:
-                \"\"\"{user_message}\"\"\"
-
-                Respond with ONLY `true` or `false` — all lowercase, no punctuation, and no other explanation.
-
-                Examples of `true`:
-                - "I want to book this flight"
-                - "Let's go ahead with option 3"
-                - "I'm ready to confirm the booking"
-
-                Examples of `false`:
-                - "Which flight is fastest?"
-                - "What does option 4 include?"
-                - "Can I leave in the afternoon instead?"
-
-                Is the user ready to book?
-                """
+        prompt = BOOOKING_INTENT_PROMPT.format(user_message=user_message)
 
         try:
             response = client.chat.completions.create(
@@ -108,11 +91,7 @@ class ChatSession:
         ]
         cleaned_messages.append({
             "role": "user",
-            "content": (
-                "Based on our earlier conversation and the table of flight options I gave you, "
-                "which numbered option is the user referring to for booking? "
-                "Please just return the number only (starting from 1)."
-            )
+            "content": FLIGHT_INDEX_PROMPT
         })
 
         try:
